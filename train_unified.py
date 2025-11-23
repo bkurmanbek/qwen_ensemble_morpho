@@ -2,8 +2,11 @@
 Unified Training Script for Kazakh Morphology
 ==============================================
 
-Single Qwen2.5-3B model for complete morphological analysis.
+Single Qwen2.5-4B model for complete morphological analysis.
 Handles morphology, semantics, lexics, and sozjasam in one pass.
+
+Uses detailed POS-specific system prompts with grammar definitions
+from all_kazakh_grammar_data.json for enhanced training.
 """
 
 import json
@@ -96,32 +99,263 @@ class UnifiedDatasetBuilder:
 
         return True
 
+    def _get_system_prompt(self, pos_tag: str, pos_def: dict, json_structure: dict, keys: list) -> str:
+        """Generate POS-specific system prompt with grammar definitions"""
+
+        system_prompts = {
+            'Зат есім': f"""Сіз қазақ тілінің зат есім морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген зат есім сөз және оның сөз табы бойынша келесі JSON құрылымын ҚАТАҢ САҚТАП толтырыңыз:
+
+{{
+  "POS tag": "{pos_tag}",
+  "word": "...",
+  "lemma": "...",
+  "morphology": {{
+    "column": "...",
+    "дара, негізгі": "...",
+    "дара, туынды": "...",
+    "күрделі, біріккен, Бірік.": "...",
+    "күрделі, қосарланған, Қос.": "...",
+    "күрделі, қысқарған, Қыс.": "...",
+    "күрделі, тіркескен, Тірк.": "..."
+  }},
+  "semantics": {{
+    "жалпы": "...",
+    "жалқы": "...",
+    "адамзат, Адз.": "...",
+    "ғаламзат, Ғалз.": "...",
+    "деректі, Дер.": "...",
+    "дерексіз, Дерз.": "..."
+  }},
+  "lexics": {{
+    "мағынасы": "..."
+  }},
+  "sozjasam": {{
+    "тәсілін, құрамын шартты қысқартумен беру": "..."
+  }}
+}}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз - ешқандай түсініктеме жоқ
+2. Барлық кілттерді дәл осы ретпен сақтаңыз: {', '.join(keys)}
+3. Ақпарат жоқ болса "NaN" деп белгілеңіз
+4. "column" morphological_forms сөздігінен алынады
+5. Семантика бөлімінде тек бір мән белсенді, қалғандары "NaN"
+6. Морфология: сөздің құрылымын анықтаңыз (дара/күрделі, негізгі/туынды)
+7. Лексика: сөздің толық мағынасын беріңіз
+8. Сөзжасам: қысқарту форматын қолданыңыз (мыс: зт/Ø, зт/-шы)""",
+
+            'Сын есім': f"""Сіз қазақ тілінің сын есім морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген сын есім сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Сын есімнің қасиет білдіретін мағынасын нақты көрсетіңіз
+5. Морфология: дара/күрделі, негізгі/туынды анықтаңыз
+6. Семантика: сапалық/қатыстық, шырай түрлерін анықтаңыз
+7. Жай шырай үшін "снЖШ", салыстырмалы үшін "снСШ" қолданыңыз""",
+
+            'Сан есім': f"""Сіз қазақ тілінің сан есім морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген сан есім сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Араб/рим цифрларын егер бар болса жазыңыз
+5. Сан есім түрін анықтаңыз: есептік/реттік/жинақтық/т.б.
+6. Морфология: дара/күрделі, негізгі/туынды анықтаңыз""",
+
+            'Етістік': f"""Сіз қазақ тілінің етістік морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген етістік сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Етістіктің іс-әрекет білдіретін мағынасын нақты көрсетіңіз
+5. Морфология: дара/күрделі, негізгі/туынды анықтаңыз
+6. Семантика: салт/сабақты, болымды/болымсыз анықтаңыз
+7. Күрделі түрлері: біріккен/құранды/аналитикалық""",
+
+            'Еліктеуіш': f"""Сіз қазақ тілінің еліктеуіш морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген еліктеуіш сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Еліктеу сөз немесе бейнелеуіш сөз екенін анықтаңыз
+5. Дыбыс еліктеуді немесе бейне суреттеуді нақты көрсетіңіз""",
+
+            'Есімдік': f"""Сіз қазақ тілінің есімдік морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген есімдік сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Есімдік түрін анықтаңыз: жіктеу/сілтеу/сұрау/өздік/жалпылау/белгісіздік/болымсыздық
+5. Морфология: дара/күрделі, негізгі/туынды анықтаңыз""",
+
+            'Одағай': f"""Сіз қазақ тілінің одағай морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген одағай сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Одағай түрін анықтаңыз: көңіл-күй/императивтік ишара/тұрмыс-салт
+5. Эмоционалдық мағынасын нақты көрсетіңіз""",
+
+            'Үстеу': f"""Сіз қазақ тілінің үстеу морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген үстеу сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Үстеу түрін анықтаңыз: мекен/мезгіл/мөлшер/сын-қимыл/күшейтпелі/мақсат/себеп-салдар/топтау
+5. Морфология: дара/күрделі, негізгі/туынды анықтаңыз""",
+
+            'Шылау': f"""Сіз қазақ тілінің шылау морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+СӨЗДІҢ СӨЗ ТАБЫ: {pos_tag}
+
+АНЫҚТАМА ЖӘНЕ БЕЛГІЛЕРІ:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+МІНДЕТІҢІЗ:
+Берілген шылау сөз бойынша JSON құрылымын толтырыңыз.
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+ҚАТАҢ ЕРЕЖЕЛЕР:
+1. ТЕК JSON форматында жауап беріңіз
+2. Барлық кілттерді сақтаңыз: {', '.join(keys)}
+3. Жоқ мәліметтерді "NaN" деп белгілеңіз
+4. Шылау түрін анықтаңыз: жалғаулық/септеулік/демеулік
+5. Морфология: дара/күрделі, негізгі/туынды анықтаңыз"""
+        }
+
+        # Return POS-specific prompt or fallback
+        return system_prompts.get(pos_tag, f"""Сіз қазақ тілінің {pos_tag} морфологиясы, семантикасы, лексикасы және сөзжасамы бойынша сарапшысыз.
+
+АНЫҚТАМА:
+{json.dumps(pos_def, ensure_ascii=False, indent=2)}
+
+JSON ҚҰРЫЛЫМЫ:
+{json.dumps({"POS tag": pos_tag, **json_structure}, ensure_ascii=False, indent=2)}
+
+Барлық кілттер: {', '.join(keys)}
+
+ТЕК JSON форматында жауап беріңіз. Жоқ мәліметтерді "NaN" деп белгілеңіз.""")
+
     def _create_training_example(self, item: dict) -> dict:
         """Create a single training example for complete morphology"""
 
         pos_tag = item['POS tag']
         word = item['word']
 
-        # Get POS-specific semantic fields
+        # Get POS-specific grammar definition
         pos_grammar = self.grammar_data.get(pos_tag, {})
+        pos_def = pos_grammar.get('definition', {})
 
-        # Build system prompt
-        system_prompt = f"""Сіз қазақ тілінің морфологиясы, семантикасы, лексикологиясы және сөзжасамы бойынша сарапшысыз.
+        # Build JSON structure for this POS
+        json_structure = {
+            "word": "...",
+            "lemma": "...",
+            "morphology": item.get('morphology', {}),
+            "semantics": item.get('semantics', {}),
+            "lexics": item.get('lexics', {}),
+            "sozjasam": item.get('sozjasam', {})
+        }
 
-МІНДЕТ: Берілген сөздің ТОЛЫҚ МОРФОЛОГИЯЛЫҚ ТАЛДАУЫН жасаңыз.
+        # Get all keys
+        keys = ["POS tag", "word", "lemma", "morphology", "semantics", "lexics", "sozjasam"]
 
-НҰСҚАУЛАР:
-1. ТЕК валидті JSON форматында жауап беріңіз
-2. Барлық бөлімдерді толық толтырыңыз:
-   - morphology: құрылымдық талдау (column, дара/күрделі, негізгі/туынды)
-   - semantics: POS табына сәйкес семантикалық категориялар
-   - lexics: сөздің толық мағынасы
-   - sozjasam: сөзжасам тәсілін қысқартумен беру
-3. lemma анықтаңыз
-4. Қазақ тілінде жазыңыз
-5. Егер мәлімет жоқ болса, "NaN" қойыңыз
-
-JSON ҚҰРЫЛЫМЫ міндетті түрде сақталуы керек."""
+        # Build detailed system prompt using grammar data
+        system_prompt = self._get_system_prompt(pos_tag, pos_def, json_structure, keys)
 
         user_prompt = f"""СӨЗ: {word}
 СӨЗ ТАБЫ: {pos_tag}
@@ -159,7 +393,7 @@ def train_unified_model(
     data_path: str,
     grammar_path: str,
     output_dir: str,
-    model_name: str = "Qwen/Qwen2.5-3B-Instruct",
+    model_name: str = "Qwen/Qwen2.5-4B-Instruct",
     num_epochs: int = 3,
     batch_size: int = 4,
     learning_rate: float = 2e-4,
@@ -343,7 +577,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", required=True, help="Path to training data JSON")
     parser.add_argument("--grammar_path", required=True, help="Path to grammar data JSON")
     parser.add_argument("--output_dir", required=True, help="Output directory for model")
-    parser.add_argument("--model_name", default="Qwen/Qwen2.5-3B-Instruct", help="Base model to fine-tune")
+    parser.add_argument("--model_name", default="Qwen/Qwen2.5-4B-Instruct", help="Base model to fine-tune")
     parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size per device")
     parser.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
