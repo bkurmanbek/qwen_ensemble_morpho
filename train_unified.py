@@ -30,16 +30,26 @@ class UnifiedDatasetBuilder:
     """Build training dataset for unified morphology model"""
 
     def __init__(self, data_path: str, grammar_path: str):
+        try:
+            import ijson
+            self.use_ijson = True
+        except ImportError:
+            self.use_ijson = False
+            logger.warning("ijson not found. Using standard json (high memory usage). Install ijson for better performance.")
+
         self.data_path = data_path
-        
-        # Load grammar data
+
+        # Load grammar data (small enough for standard json)
         with open(grammar_path, 'r', encoding='utf-8') as f:
             self.grammar_data = json.load(f)
 
-        # Load data
-        logger.info(f"Loading data from {data_path}...")
-        with open(data_path, 'r', encoding='utf-8') as f:
-            self.data = json.load(f)
+        # Pre-load data if not using ijson or if max_samples is small
+        if not self.use_ijson:
+            logger.info(f"Loading data from {data_path}...")
+            with open(data_path, 'r', encoding='utf-8') as f:
+                self.data = json.load(f)
+        else:
+            self.data = None  # Will stream in build_dataset
 
     def build_dataset(self, max_samples: int = None) -> Dataset:
         """Build HuggingFace dataset for complete morphology"""
@@ -47,39 +57,95 @@ class UnifiedDatasetBuilder:
         examples = []
         skipped_count = 0
 
-        data_to_process = self.data[:max_samples] if max_samples else self.data
-        logger.info(f"Processing {len(data_to_process)} items...")
-
-        for i, item in enumerate(data_to_process):
-            if (i + 1) % 10000 == 0:
-                logger.info(f"  Processed {i+1}/{len(data_to_process)} items...")
+        if self.use_ijson:
+            import ijson
+            logger.info(f"Streaming data from {self.data_path}...")
 
             try:
-                # Basic validation
-                if not isinstance(item, dict):
-                    skipped_count += 1
-                    continue
+                # Use ijson to stream items
+                with open(self.data_path, 'r', encoding='utf-8') as f:
+                    # Assuming top-level array
+                    items = ijson.items(f, 'item')
 
-                # Check required fields
-                if 'word' not in item or 'POS tag' not in item:
-                    skipped_count += 1
-                    continue
+                    for i, item in enumerate(items):
+                        if max_samples and i >= max_samples:
+                            break
 
-                # Validate all sections
-                if not self._validate_item(item):
-                    skipped_count += 1
-                    continue
+                        if (i + 1) % 10000 == 0:
+                            logger.info(f"  Processed {i+1} items...")
 
-                example = self._create_training_example(item)
-                if example:
-                    examples.append(example)
-                else:
-                    skipped_count += 1
+                        try:
+                            # Basic validation
+                            if not isinstance(item, dict):
+                                skipped_count += 1
+                                continue
 
+                            # Check required fields
+                            if 'word' not in item or 'POS tag' not in item:
+                                skipped_count += 1
+                                continue
+
+                            # Validate all sections
+                            if not self._validate_item(item):
+                                skipped_count += 1
+                                continue
+
+                            example = self._create_training_example(item)
+                            if example:
+                                examples.append(example)
+                            else:
+                                skipped_count += 1
+
+                        except Exception as e:
+                            logger.warning(f"Skipping item {i} due to error: {e}")
+                            skipped_count += 1
+                            continue
             except Exception as e:
-                logger.warning(f"Skipping item {i} due to error: {e}")
-                skipped_count += 1
-                continue
+                logger.warning(f"ijson streaming failed: {e}")
+                logger.warning("Falling back to standard json load (may use high memory)...")
+                self.use_ijson = False
+                # Fall through to standard load
+
+        if not self.use_ijson:
+            # Load data if not already loaded
+            if self.data is None:
+                logger.info(f"Loading data from {self.data_path}...")
+                with open(self.data_path, 'r', encoding='utf-8') as f:
+                    self.data = json.load(f)
+
+            data_to_process = self.data[:max_samples] if max_samples else self.data
+            logger.info(f"Processing {len(data_to_process)} items...")
+
+            for i, item in enumerate(data_to_process):
+                if (i + 1) % 10000 == 0:
+                    logger.info(f"  Processed {i+1}/{len(data_to_process)} items...")
+
+                try:
+                    # Basic validation
+                    if not isinstance(item, dict):
+                        skipped_count += 1
+                        continue
+
+                    # Check required fields
+                    if 'word' not in item or 'POS tag' not in item:
+                        skipped_count += 1
+                        continue
+
+                    # Validate all sections
+                    if not self._validate_item(item):
+                        skipped_count += 1
+                        continue
+
+                    example = self._create_training_example(item)
+                    if example:
+                        examples.append(example)
+                    else:
+                        skipped_count += 1
+
+                except Exception as e:
+                    logger.warning(f"Skipping item {i} due to error: {e}")
+                    skipped_count += 1
+                    continue
 
         logger.info(f"Created {len(examples)} training examples")
         logger.info(f"Skipped {skipped_count} invalid/empty items")
