@@ -10,7 +10,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import logging
 import argparse
-from typing import Dict, Optional
+from typing import Dict
 import re
 
 logging.basicConfig(level=logging.INFO)
@@ -148,14 +148,14 @@ JSON ҚҰРЫЛЫМЫ міндетті түрде сақталуы керек.""
             try:
                 json_str = response.split("```json")[1].split("```")[0].strip()
                 return json_str
-            except:
+            except (IndexError, ValueError):
                 pass
 
         if "```" in response:
             try:
                 json_str = response.split("```")[1].split("```")[0].strip()
                 return json_str
-            except:
+            except (IndexError, ValueError):
                 pass
 
         # Try to find JSON by braces

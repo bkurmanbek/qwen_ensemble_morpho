@@ -7,7 +7,7 @@ FastAPI server for serving the unified Qwen model.
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Optional
+from typing import Dict
 import uvicorn
 import logging
 from inference import UnifiedMorphologyModel
