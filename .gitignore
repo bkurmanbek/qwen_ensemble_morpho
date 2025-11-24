@@ -40,3 +40,5 @@ wheels/
 
 # Large data files
 all_structured_kazakh_data.json
+eval_1000.json
+train_data.json
