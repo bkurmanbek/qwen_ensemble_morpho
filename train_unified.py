@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 class UnifiedDatasetBuilder:
     """Build training dataset for unified morphology model"""
 
+    def __init__(self, data_path: str, grammar_path: str):
         try:
             import ijson
             self.use_ijson = True
